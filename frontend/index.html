@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ElectroStore</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-box">
+      <h2>Login to ElectroStore</h2>
+      <p class="muted">Customer storefront + admin stock dashboard built from your uploaded project structure.</p>
+      <form id="login-form">
+        <div class="form-group">
+          <label>Email</label>
+          <input id="login-email" type="email" placeholder="admin@electrostore.bg" required>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input id="login-password" type="password" placeholder="••••••••" required>
+        </div>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+        <div id="login-error" style="margin-top:10px;color:#ff9a97"></div>
+      </form>
+      <div class="login-help">
+        <strong>Demo accounts</strong><br>
+        Admin: admin@electrostore.bg / admin123<br>
+        Customer: dimitar.nikolov@email.bg / customer123<br>
+        Customer: ana.ivanova@gmail.com / customer123
+      </div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">⚡</div>
+      <div>ElectroStore</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="user-badge" class="user-badge">Guest</div>
+      <div id="auth-actions"></div>
+    </div>
+  </header>
+
+  <div id="app-screen">
+    <div class="layout">
+      <aside class="sidebar">
+        <nav class="nav">
+          <div class="nav-link active" data-page="shop" onclick="showPage('shop')">Shop</div>
+          <div class="nav-link hidden" id="cart-nav" data-page="cart" onclick="showPage('cart')">Cart / Checkout</div>
+          <div class="nav-link hidden" id="orders-nav" data-page="orders" onclick="showPage('orders')">Orders</div>
+          <div class="nav-link hidden" id="admin-nav" data-page="admin" onclick="showPage('admin')">Admin</div>
+        </nav>
+
+        <div class="demo-box">
+          <strong>Project notes</strong>
+          <div class="muted" style="margin-top:8px">
+            Frontend: HTML + CSS + JS<br>
+            Backend: Node.js + Express API<br>
+            Database: PostgreSQL
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <section id="page-shop" class="page active">
+          <div class="hero">
+            <div class="hero-card">
+              <h1>Electronics storefront built from your uploaded model</h1>
+              <p>
+                This version keeps the single-page HTML/CSS/JS + Node API architecture,
+                but transforms it into an electronics shop with customer checkout and an admin stock panel.
+              </p>
+            </div>
+            <div class="panel">
+              <div class="section-title"><h2>Featured</h2></div>
+              <div id="featured-grid" class="product-grid"></div>
+            </div>
+          </div>
+
+          <div class="section-title"><h2>Browse products</h2></div>
+          <div class="controls">
+            <input id="search-input" class="control" placeholder="Search by name, brand, or model">
+            <select id="category-filter" class="control">
+              <option value="">All categories</option>
+            </select>
+          </div>
+          <div id="product-grid" class="product-grid"></div>
+        </section>
+
+        <section id="page-cart" class="page">
+          <div class="grid-2">
+            <div class="panel">
+              <div class="section-title"><h2>Your cart</h2></div>
+              <div id="cart-items"></div>
+              <div class="section-title">
+                <h2>Total</h2>
+                <div id="cart-total" class="price">€0.00</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-title"><h2>Checkout</h2></div>
+              <form id="checkout-form">
+                <div class="form-group">
+                  <label>Shipping address</label>
+                  <select id="shipping-address" required></select>
+                </div>
+                <div class="form-group">
+                  <label>Billing address</label>
+                  <select id="billing-address" required></select>
+                </div>
+                <div class="form-group">
+                  <label>Payment method</label>
+                  <select id="payment-method">
+                    <option>Card</option>
+                    <option>PayPal</option>
+                    <option>Cash on Delivery</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Order notes</label>
+                  <textarea id="checkout-notes" placeholder="Optional delivery notes"></textarea>
+                </div>
+                <button class="btn btn-primary" type="submit">Place order</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-orders" class="page">
+          <div class="section-title"><h2>Orders</h2></div>
+          <div id="orders-list"></div>
+          <div id="admin-orders-table" style="margin-top:18px"></div>
+        </section>
+
+        <section id="page-admin" class="page">
+          <div class="section-title"><h2>Admin dashboard</h2></div>
+          <div id="summary-cards" class="summary-grid"></div>
+
+          <div class="panel" style="margin-bottom:18px">
+            <div class="section-title"><h2>Product list</h2></div>
+            <div id="admin-products-table"></div>
+          </div>
+
+          <div class="panel">
+            <div class="section-title"><h2 id="product-form-title">Add new product</h2></div>
+            <form id="product-form">
+              <div class="form-grid">
+                <div class="form-group"><label>Barcode</label><input id="pf-barcode" required></div>
+                <div class="form-group"><label>Name</label><input id="pf-name" required></div>
+                <div class="form-group"><label>Brand</label><input id="pf-brand"></div>
+                <div class="form-group"><label>Category</label><input id="pf-category"></div>
+                <div class="form-group"><label>Model</label><input id="pf-model"></div>
+                <div class="form-group"><label>Price</label><input id="pf-price" type="number" step="0.01" required></div>
+                <div class="form-group"><label>Stock</label><input id="pf-stock" type="number" min="0" required></div>
+                <div class="form-group"><label>Release year</label><input id="pf-year" type="number"></div>
+                <div class="form-group"><label>Release month</label><input id="pf-month" type="number" min="1" max="12"></div>
+                <div class="form-group" style="grid-column:1/-1"><label>Image URL</label><input id="pf-image"></div>
+                <div class="form-group" style="grid-column:1/-1"><label>Description</label><textarea id="pf-description"></textarea></div>
+                <div class="form-group"><label><input id="pf-featured" type="checkbox"> Featured product</label></div>
+              </div>
+              <div style="display:flex;gap:12px;margin-top:14px">
+                <button class="btn btn-primary" type="submit">Save product</button>
+                <button class="btn btn-secondary" type="button" onclick="resetProductForm()">Reset</button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
