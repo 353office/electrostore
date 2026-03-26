@@ -8,8 +8,20 @@ const { createPool } = require('./db');
 const app = express();
 const pool = createPool();
 
-const corsOrigin = process.env.CORS_ORIGIN || '*';
-app.use(cors({ origin: corsOrigin }));
+const configuredOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean)
+  .map(origin => origin === '*' ? origin : origin.replace(/\/$/, ''));
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || configuredOrigins.includes('*')) return callback(null, true);
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    if (configuredOrigins.includes(normalizedOrigin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  }
+}));
 app.use(express.json());
 
 function mapUser(row) {
