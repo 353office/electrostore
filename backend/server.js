@@ -8,21 +8,29 @@ const { createPool } = require('./db');
 const app = express();
 const pool = createPool();
 
-const configuredOrigins = (process.env.CORS_ORIGIN || '*')
+function normalizeOrigin(value) {
+  return String(value || '').trim().replace(/\/$/, '');
+}
+
+const allowedOrigins = (process.env.CORS_ORIGIN || '*')
   .split(',')
-  .map(origin => origin.trim())
-  .filter(Boolean)
-  .map(origin => origin === '*' ? origin : origin.replace(/\/$/, ''));
+  .map(normalizeOrigin)
+  .filter(Boolean);
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || configuredOrigins.includes('*')) return callback(null, true);
-    const normalizedOrigin = origin.replace(/\/$/, '');
-    if (configuredOrigins.includes(normalizedOrigin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
-  }
+    if (!origin || allowedOrigins.includes('*')) return callback(null, true);
+    const normalized = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalized)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: false
 }));
 app.use(express.json());
+
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'ElectroStore API' });
+});
 
 function mapUser(row) {
   return {
@@ -155,8 +163,13 @@ app.get('/api/products/:barcode', async (req, res) => {
 });
 
 app.get('/api/categories', async (req, res) => {
-  const result = await pool.query('SELECT DISTINCT category FROM product WHERE category IS NOT NULL ORDER BY category');
-  res.json(result.rows.map(r => r.category));
+  try {
+    const result = await pool.query('SELECT DISTINCT category FROM product WHERE category IS NOT NULL ORDER BY category');
+    res.json(result.rows.map(r => r.category));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load categories' });
+  }
 });
 
 app.get('/api/cart', authRequired, async (req, res) => {
@@ -392,8 +405,13 @@ app.get('/api/admin/summary', authRequired, adminRequired, async (req, res) => {
 });
 
 app.get('/api/admin/products', authRequired, adminRequired, async (req, res) => {
-  const result = await pool.query('SELECT * FROM product ORDER BY name ASC');
-  res.json(result.rows);
+  try {
+    const result = await pool.query('SELECT * FROM product ORDER BY name ASC');
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load admin products' });
+  }
 });
 
 app.post('/api/admin/products', authRequired, adminRequired, async (req, res) => {
@@ -482,27 +500,43 @@ app.delete('/api/admin/products/:barcode', authRequired, adminRequired, async (r
 });
 
 app.get('/api/admin/orders', authRequired, adminRequired, async (req, res) => {
-  const result = await pool.query(
-    `SELECT o.id, o.order_status, o.total_amount, o.order_date, o.payment_method,
-            c.first_name, c.last_name, c.egn
-     FROM orders o
-     LEFT JOIN customer c ON c.egn = o.egn
-     ORDER BY o.order_date DESC`
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT o.id, o.order_status, o.total_amount, o.order_date, o.payment_method,
+              c.first_name, c.last_name, c.egn
+       FROM orders o
+       LEFT JOIN customer c ON c.egn = o.egn
+       ORDER BY o.order_date DESC`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load admin orders' });
+  }
 });
 
 app.patch('/api/admin/orders/:id/status', authRequired, adminRequired, async (req, res) => {
-  const { order_status } = req.body;
-  const result = await pool.query(
-    `UPDATE orders
-     SET order_status = $1, updated_at = CURRENT_TIMESTAMP
-     WHERE id = $2
-     RETURNING *`,
-    [order_status, req.params.id]
-  );
-  if (!result.rows[0]) return res.status(404).json({ error: 'Order not found' });
-  res.json(result.rows[0]);
+  try {
+    const { order_status } = req.body;
+    const result = await pool.query(
+      `UPDATE orders
+       SET order_status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING *`,
+      [order_status, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Order not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not update order status' });
+  }
+});
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({ error: error.message || 'Internal server error' });
 });
 
 const port = process.env.PORT || 3001;
