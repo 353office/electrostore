@@ -12,24 +12,23 @@ function normalizeOrigin(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
 
-const allowedOrigins = (process.env.CORS_ORIGIN || '*')
-  .split(',')
-  .map(normalizeOrigin)
-  .filter(Boolean);
+const rawCorsOrigin = process.env.CORS_ORIGIN || '*';
+const allowedOrigins = rawCorsOrigin === '*'
+  ? '*'
+  : rawCorsOrigin.split(',').map(normalizeOrigin).filter(Boolean);
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes('*')) return callback(null, true);
-    const normalized = normalizeOrigin(origin);
-    if (allowedOrigins.includes(normalized)) return callback(null, true);
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    if (!origin) return callback(null, true);
+    if (allowedOrigins === '*') return callback(null, true);
+    return callback(null, allowedOrigins.includes(normalizeOrigin(origin)));
   },
-  credentials: false
+  credentials: true
 }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'ElectroStore API' });
+  res.status(200).json({ ok: true, service: 'ElectroStore API', db_required: true });
 });
 
 function mapUser(row) {
@@ -84,8 +83,36 @@ function adminRequired(req, res, next) {
 }
 
 app.get('/api/health', async (req, res) => {
-  const result = await pool.query('SELECT NOW() AS now');
-  res.json({ ok: true, time: result.rows[0].now });
+  try {
+    res.json({ ok: true, service: 'ElectroStore API', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: 'Health check failed' });
+  }
+});
+
+app.get('/api/db-health', async (req, res) => {
+  try {
+    const now = await pool.query('SELECT NOW() AS now');
+    const tables = await pool.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('product', 'app_users', 'customer', 'orders')
+      ORDER BY table_name
+    `);
+    res.json({
+      ok: true,
+      database_time: now.rows[0].now,
+      tables: tables.rows.map(r => r.table_name)
+    });
+  } catch (error) {
+    console.error('DB health failed:', error);
+    res.status(500).json({
+      ok: false,
+      error: error.message,
+      hint: 'Check DATABASE_URL, Aiven SSL settings, and whether init_postgres.sql was imported.'
+    });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -168,7 +195,7 @@ app.get('/api/categories', async (req, res) => {
     res.json(result.rows.map(r => r.category));
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Could not load categories' });
+    res.status(500).json({ error: 'Could not load categories', details: error.message });
   }
 });
 
@@ -405,13 +432,8 @@ app.get('/api/admin/summary', authRequired, adminRequired, async (req, res) => {
 });
 
 app.get('/api/admin/products', authRequired, adminRequired, async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM product ORDER BY name ASC');
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Could not load admin products' });
-  }
+  const result = await pool.query('SELECT * FROM product ORDER BY name ASC');
+  res.json(result.rows);
 });
 
 app.post('/api/admin/products', authRequired, adminRequired, async (req, res) => {
@@ -500,43 +522,32 @@ app.delete('/api/admin/products/:barcode', authRequired, adminRequired, async (r
 });
 
 app.get('/api/admin/orders', authRequired, adminRequired, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT o.id, o.order_status, o.total_amount, o.order_date, o.payment_method,
-              c.first_name, c.last_name, c.egn
-       FROM orders o
-       LEFT JOIN customer c ON c.egn = o.egn
-       ORDER BY o.order_date DESC`
-    );
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Could not load admin orders' });
-  }
+  const result = await pool.query(
+    `SELECT o.id, o.order_status, o.total_amount, o.order_date, o.payment_method,
+            c.first_name, c.last_name, c.egn
+     FROM orders o
+     LEFT JOIN customer c ON c.egn = o.egn
+     ORDER BY o.order_date DESC`
+  );
+  res.json(result.rows);
 });
 
 app.patch('/api/admin/orders/:id/status', authRequired, adminRequired, async (req, res) => {
-  try {
-    const { order_status } = req.body;
-    const result = await pool.query(
-      `UPDATE orders
-       SET order_status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING *`,
-      [order_status, req.params.id]
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Order not found' });
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Could not update order status' });
-  }
+  const { order_status } = req.body;
+  const result = await pool.query(
+    `UPDATE orders
+     SET order_status = $1, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2
+     RETURNING *`,
+    [order_status, req.params.id]
+  );
+  if (!result.rows[0]) return res.status(404).json({ error: 'Order not found' });
+  res.json(result.rows[0]);
 });
 
 app.use((error, req, res, next) => {
-  console.error(error);
-  if (res.headersSent) return next(error);
-  res.status(500).json({ error: error.message || 'Internal server error' });
+  console.error('Unhandled error:', error);
+  res.status(500).json({ error: 'Internal server error', details: error.message });
 });
 
 const port = process.env.PORT || 3001;
