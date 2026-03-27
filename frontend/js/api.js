@@ -72,11 +72,32 @@ window.API = {
     return this.request('/me/addresses');
   },
 
-  saveAddresses(payload) {
-    return this.request('/me/addresses', {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
+  async saveAddresses(payload) {
+    if (!this.token) {
+      throw new Error('Трябва да влезеш в профила си, за да запазиш адресите.');
+    }
+
+    try {
+      return await this.request('/me/addresses', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      if (/404/.test(error.message) || /not found/i.test(error.message) || /Request failed/i.test(error.message)) {
+        try {
+          return await this.request('/me/addresses', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
+        } catch (_) {
+          return this.request('/me/addresses', {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+          });
+        }
+      }
+      throw error;
+    }
   },
 
   checkout(payload) {
