@@ -4,6 +4,14 @@ function refreshIcons() {
   }
 }
 
+function formatDateTimeEU(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 window.STATE = {
   user: null,
   products: [],
@@ -27,6 +35,19 @@ function bindEvents() {
   document.getElementById('category-filter').addEventListener('change', loadCatalog);
   document.getElementById('checkout-form').addEventListener('submit', handleCheckout);
   document.getElementById('product-form').addEventListener('submit', handleSaveProduct);
+
+  ['shipping-address', 'billing-address'].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.addEventListener('blur', async () => {
+        try {
+          await persistAddresses();
+        } catch (error) {
+          console.error(error);
+        }
+      });
+    }
+  });
 }
 
 async function tryRestoreSession() {
@@ -382,21 +403,43 @@ async function loadAddresses() {
   const addresses = await API.getAddresses();
   const shipping = document.getElementById('shipping-address');
   const billing = document.getElementById('billing-address');
-  const options = addresses.map(a => `<option value="${a.id}">${escapeHtml(a.address)} (${escapeHtml(a.address_type || 'Адрес')})</option>`).join('');
-  shipping.innerHTML = options;
-  billing.innerHTML = options;
+
+  const shippingAddress = addresses.find(a => (a.address_type || '').toLowerCase() === 'shipping') || addresses[0];
+  const billingAddress = addresses.find(a => (a.address_type || '').toLowerCase() === 'billing') || shippingAddress || addresses[0];
+
+  shipping.value = shippingAddress?.address || '';
+  billing.value = billingAddress?.address || shipping.value || '';
   refreshIcons();
+}
+
+async function persistAddresses() {
+  if (!STATE.user || STATE.user.role !== 'customer') return;
+  const shippingAddress = document.getElementById('shipping-address').value.trim();
+  const billingAddress = document.getElementById('billing-address').value.trim();
+
+  if (!shippingAddress || !billingAddress) {
+    return;
+  }
+
+  await API.saveAddresses({
+    shipping_address: shippingAddress,
+    billing_address: billingAddress
+  });
 }
 
 async function handleCheckout(event) {
   event.preventDefault();
   try {
     const payload = {
-      shipping_address_id: Number(document.getElementById('shipping-address').value),
-      billing_address_id: Number(document.getElementById('billing-address').value),
+      shipping_address: document.getElementById('shipping-address').value.trim(),
+      billing_address: document.getElementById('billing-address').value.trim(),
       payment_method: document.getElementById('payment-method').value,
       notes: document.getElementById('checkout-notes').value.trim()
     };
+    await API.saveAddresses({
+      shipping_address: payload.shipping_address,
+      billing_address: payload.billing_address
+    });
     const result = await API.checkout(payload);
     showToast(`Поръчка №${result.order_id} е приета успешно`);
     await refreshCart();
@@ -434,7 +477,7 @@ function renderOrders(orders) {
         <strong>Поръчка №${order.id}</strong>
         <span class="pill">${escapeHtml(order.order_status || 'Неизвестен')}</span>
       </div>
-      <div class="muted">${new Date(order.order_date).toLocaleString()}</div>
+      <div class="muted">${formatDateTimeEU(order.order_date)}</div>
       <div>${order.item_count} артикул(а)</div>
       <div class="price">${formatMoney(order.total_amount)}</div>
     </div>
@@ -505,7 +548,7 @@ function renderAdminOrders(orders) {
           <tr>
             <td>${order.id}</td>
             <td>${escapeHtml((order.first_name || '') + ' ' + (order.last_name || ''))}</td>
-            <td>${new Date(order.order_date).toLocaleString()}</td>
+            <td>${formatDateTimeEU(order.order_date)}</td>
             <td>${escapeHtml(order.order_status || '')}</td>
             <td>${formatMoney(order.total_amount)}</td>
             <td>

@@ -72,6 +72,13 @@ window.API = {
     return this.request('/me/addresses');
   },
 
+  saveAddresses(payload) {
+    return this.request('/me/addresses', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+  },
+
   checkout(payload) {
     return this.request('/orders/checkout', {
       method: 'POST',
