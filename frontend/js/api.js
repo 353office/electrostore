@@ -10,10 +10,14 @@ window.API = {
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
 
     const response = await fetch(`${this.baseUrl}${path}`, { ...options, headers });
-
     const data = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      throw new Error(data.error || 'Request failed');
+      const message = data.error || `Request failed (${response.status})`;
+      const error = new Error(message);
+      error.status = response.status;
+      error.payload = data;
+      throw error;
     }
     return data;
   },
@@ -83,18 +87,8 @@ window.API = {
         body: JSON.stringify(payload)
       });
     } catch (error) {
-      if (/404/.test(error.message) || /not found/i.test(error.message) || /Request failed/i.test(error.message)) {
-        try {
-          return await this.request('/me/addresses', {
-            method: 'POST',
-            body: JSON.stringify(payload)
-          });
-        } catch (_) {
-          return this.request('/me/addresses', {
-            method: 'PATCH',
-            body: JSON.stringify(payload)
-          });
-        }
+      if (error.status === 404) {
+        throw new Error('Адресният маршрут липсва на сървъра. Качи и деплойни backend/server.js от тази версия.');
       }
       throw error;
     }

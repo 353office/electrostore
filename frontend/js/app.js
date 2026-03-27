@@ -519,7 +519,7 @@ function renderAdminOrders(orders) {
           <tr>
             <td>${order.id}</td>
             <td>${escapeHtml((order.first_name || '') + ' ' + (order.last_name || ''))}</td>
-            <td>${new Date(order.order_date).toLocaleString()}</td>
+            <td>${formatDateTimeBg(order.order_date)}</td>
             <td>${escapeHtml(order.order_status || '')}</td>
             <td>${formatMoney(order.total_amount)}</td>
             <td>

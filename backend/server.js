@@ -8,6 +8,13 @@ const { createPool } = require('./db');
 const app = express();
 const pool = createPool();
 
+const BUILD_ID = 'address-route-check-' + new Date().toISOString();
+
+app.use((req, res, next) => {
+  res.setHeader('X-ElectroStore-Build', BUILD_ID);
+  next();
+});
+
 function normalizeOrigin(value) {
   return String(value || '').trim().replace(/\/$/, '');
 }
@@ -84,10 +91,25 @@ function adminRequired(req, res, next) {
 
 app.get('/api/health', async (req, res) => {
   try {
-    res.json({ ok: true, service: 'ElectroStore API', timestamp: new Date().toISOString() });
+    res.json({ ok: true, service: 'ElectroStore API', timestamp: new Date().toISOString(), build: BUILD_ID });
   } catch (error) {
     res.status(500).json({ ok: false, error: 'Health check failed' });
   }
+});
+
+app.get('/api/build-info', (req, res) => {
+  res.json({
+    ok: true,
+    build: BUILD_ID,
+    routes: [
+      'GET /api/health',
+      'GET /api/db-health',
+      'GET /api/me/addresses',
+      'PUT /api/me/addresses',
+      'POST /api/me/addresses',
+      'PATCH /api/me/addresses'
+    ]
+  });
 });
 
 app.get('/api/db-health', async (req, res) => {
@@ -409,6 +431,81 @@ app.get('/api/me/addresses', authRequired, async (req, res) => {
     res.status(500).json({ error: 'Could not load addresses' });
   }
 });
+
+async function saveAddressesHandler(req, res) {
+  const client = await pool.connect();
+  try {
+    if (!req.user.customer_egn) {
+      return res.status(400).json({ error: 'No customer profile linked to this account' });
+    }
+
+    const shippingAddress = String(req.body?.shipping_address || '').trim();
+    const billingAddress = String(req.body?.billing_address || '').trim();
+
+    if (!shippingAddress || !billingAddress) {
+      return res.status(400).json({ error: 'Shipping and billing addresses are required' });
+    }
+
+    await client.query('BEGIN');
+
+    const shippingExisting = await client.query(
+      `SELECT id FROM customer_address WHERE egn = $1 AND LOWER(COALESCE(address_type, '')) = 'shipping' ORDER BY id ASC LIMIT 1`,
+      [req.user.customer_egn]
+    );
+
+    let shippingId;
+    if (shippingExisting.rows[0]) {
+      const updated = await client.query(
+        `UPDATE customer_address SET address = $1, is_default = TRUE WHERE id = $2 RETURNING id`,
+        [shippingAddress, shippingExisting.rows[0].id]
+      );
+      shippingId = updated.rows[0].id;
+    } else {
+      const inserted = await client.query(
+        `INSERT INTO customer_address (address, address_type, is_default, egn) VALUES ($1, 'Shipping', TRUE, $2) RETURNING id`,
+        [shippingAddress, req.user.customer_egn]
+      );
+      shippingId = inserted.rows[0].id;
+    }
+
+    const billingExisting = await client.query(
+      `SELECT id FROM customer_address WHERE egn = $1 AND LOWER(COALESCE(address_type, '')) = 'billing' ORDER BY id ASC LIMIT 1`,
+      [req.user.customer_egn]
+    );
+
+    let billingId;
+    if (billingExisting.rows[0]) {
+      const updated = await client.query(
+        `UPDATE customer_address SET address = $1, is_default = FALSE WHERE id = $2 RETURNING id`,
+        [billingAddress, billingExisting.rows[0].id]
+      );
+      billingId = updated.rows[0].id;
+    } else {
+      const inserted = await client.query(
+        `INSERT INTO customer_address (address, address_type, is_default, egn) VALUES ($1, 'Billing', FALSE, $2) RETURNING id`,
+        [billingAddress, req.user.customer_egn]
+      );
+      billingId = inserted.rows[0].id;
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      shipping_address_id: shippingId,
+      billing_address_id: billingId
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(error);
+    res.status(500).json({ error: 'Could not save addresses' });
+  } finally {
+    client.release();
+  }
+}
+
+app.put('/api/me/addresses', authRequired, saveAddressesHandler);
+app.post('/api/me/addresses', authRequired, saveAddressesHandler);
+app.patch('/api/me/addresses', authRequired, saveAddressesHandler);
 
 app.get('/api/admin/summary', authRequired, adminRequired, async (req, res) => {
   try {
