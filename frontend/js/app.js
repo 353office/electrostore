@@ -1,3 +1,11 @@
+
+function refreshIcons() {
+  if (window.lucide && typeof window.lucide.createIcons === 'function') {
+    window.lucide.createIcons();
+  }
+}
+
+
 window.STATE = {
   user: null,
   products: [],
@@ -11,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   tryRestoreSession();
   await loadCatalog();
+  refreshIcons();
 });
 
 function bindEvents() {
@@ -57,18 +66,19 @@ function updateAuthUI() {
   if (!STATE.user) {
     loginScreen.classList.remove('hidden');
     appScreen.classList.add('blurred');
-    userBadge.textContent = 'Guest';
+    userBadge.textContent = 'Гост';
     adminNav.classList.add('hidden');
     cartNav.classList.add('hidden');
     ordersNav.classList.add('hidden');
-    authActions.innerHTML = `<button class="btn btn-primary" onclick="openLogin()">Login</button>`;
+    authActions.innerHTML = `<button class="btn btn-primary" onclick="openLogin()"><i data-lucide="log-in"></i>Вход</button>`;
+    refreshIcons();
     return;
   }
 
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('blurred');
-  userBadge.textContent = `${STATE.user.display_name} · ${STATE.user.role}`;
-  authActions.innerHTML = `<button class="btn btn-secondary" onclick="logout()">Logout</button>`;
+  userBadge.textContent = `${STATE.user.display_name} · ${STATE.user.role === 'admin' ? 'админ' : 'клиент'}`;
+  authActions.innerHTML = `<button class="btn btn-secondary" onclick="logout()"><i data-lucide="log-out"></i>Изход</button>`;
 
   if (STATE.user.role === 'admin') {
     adminNav.classList.remove('hidden');
@@ -79,6 +89,7 @@ function updateAuthUI() {
     cartNav.classList.remove('hidden');
     ordersNav.classList.remove('hidden');
   }
+  refreshIcons();
 }
 
 function openLogin() {
@@ -130,6 +141,7 @@ function showPage(page) {
   document.getElementById(`page-${page}`).classList.add('active');
   const nav = document.querySelector(`.nav-link[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
+  refreshIcons();
 }
 
 async function loadCatalog() {
@@ -141,6 +153,7 @@ async function loadCatalog() {
     STATE.products = await API.getProducts({ search, category });
     renderFeaturedProducts();
     renderProductGrid();
+    refreshIcons();
   } catch (error) {
     document.getElementById('product-grid').innerHTML = `<div class="empty-state">${error.message}</div>`;
   }
@@ -149,7 +162,7 @@ async function loadCatalog() {
 function renderCategoryFilter() {
   const current = document.getElementById('category-filter').value;
   const select = document.getElementById('category-filter');
-  select.innerHTML = `<option value="">All categories</option>` +
+  select.innerHTML = `<option value="">Всички категории</option>` +
     STATE.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   select.value = current;
 }
@@ -158,19 +171,21 @@ function renderFeaturedProducts() {
   const featured = STATE.products.filter(p => p.is_featured).slice(0, 4);
   const container = document.getElementById('featured-grid');
   if (!featured.length) {
-    container.innerHTML = `<div class="empty-state">No featured products found.</div>`;
+    container.innerHTML = `<div class="empty-state">Няма препоръчани продукти.</div>`;
     return;
   }
   container.innerHTML = featured.map(renderProductCard).join('');
+  refreshIcons();
 }
 
 function renderProductGrid() {
   const container = document.getElementById('product-grid');
   if (!STATE.products.length) {
-    container.innerHTML = `<div class="empty-state">No products match the current filters.</div>`;
+    container.innerHTML = `<div class="empty-state">Няма продукти по зададените критерии.</div>`;
     return;
   }
   container.innerHTML = STATE.products.map(renderProductCard).join('');
+  refreshIcons();
 }
 
 function renderProductCard(product) {
@@ -180,17 +195,17 @@ function renderProductCard(product) {
         <img class="product-image" src="${product.image_url || 'https://placehold.co/600x400?text=ElectroStore'}" alt="${escapeHtml(product.name)}">
       </div>
       <div class="product-body">
-        <div class="product-meta">${escapeHtml(product.category || 'Misc')} · ${escapeHtml(product.brand || '')}</div>
+        <div class="product-meta">${escapeHtml(product.category || 'Разни')} · ${escapeHtml(product.brand || '')}</div>
         <h3>${escapeHtml(product.name)}</h3>
         <p class="muted">${escapeHtml(product.description || product.model || '')}</p>
         <div class="product-footer">
           <div>
             <div class="price">${formatMoney(product.price)}</div>
-            <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Stock: ${product.stock_qty}</div>
+            <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Наличност: ${product.stock_qty}</div>
           </div>
           ${STATE.user && STATE.user.role === 'customer'
-            ? `<button class="btn btn-primary" onclick="addProductToCart('${product.barcode}')">Add to cart</button>`
-            : `<button class="btn btn-secondary" onclick="openLogin()">Login to buy</button>`}
+            ? `<button class="btn btn-primary" onclick="addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави</button>`
+            : `<button class="btn btn-secondary" onclick="openLogin()"><i data-lucide="log-in"></i>Влез за покупка</button>`}
         </div>
       </div>
     </article>
@@ -201,7 +216,7 @@ async function addProductToCart(barcode) {
   try {
     await API.addToCart(barcode, 1);
     await refreshCart();
-    showToast('Product added to cart');
+    showToast('Продуктът е добавен в количката');
   } catch (error) {
     showToast(error.message, true);
   }
@@ -221,7 +236,7 @@ function renderCart() {
   const wrap = document.getElementById('cart-items');
   const totalBox = document.getElementById('cart-total');
   if (!STATE.cart || !STATE.cart.items.length) {
-    wrap.innerHTML = `<div class="empty-state">Your cart is empty.</div>`;
+    wrap.innerHTML = `<div class="empty-state">Количката е празна.</div>`;
     totalBox.textContent = '€0.00';
     return;
   }
@@ -234,11 +249,12 @@ function renderCart() {
       </div>
       <div class="cart-actions">
         <input class="qty-input" type="number" min="1" value="${item.quantity}" onchange="changeQty(${item.id}, this.value)">
-        <button class="btn btn-ghost" onclick="removeCartItem(${item.id})">Remove</button>
+        <button class="btn btn-ghost" onclick="removeCartItem(${item.id})">Премахни</button>
       </div>
     </div>
   `).join('');
   totalBox.textContent = formatMoney(STATE.cart.subtotal);
+  refreshIcons();
 }
 
 async function changeQty(id, quantity) {
@@ -264,9 +280,10 @@ async function loadAddresses() {
   const addresses = await API.getAddresses();
   const shipping = document.getElementById('shipping-address');
   const billing = document.getElementById('billing-address');
-  const options = addresses.map(a => `<option value="${a.id}">${escapeHtml(a.address)} (${escapeHtml(a.address_type || 'Address')})</option>`).join('');
+  const options = addresses.map(a => `<option value="${a.id}">${escapeHtml(a.address)} (${escapeHtml(a.address_type || 'Адрес')})</option>`).join('');
   shipping.innerHTML = options;
   billing.innerHTML = options;
+  refreshIcons();
 }
 
 async function handleCheckout(event) {
@@ -279,7 +296,7 @@ async function handleCheckout(event) {
       notes: document.getElementById('checkout-notes').value.trim()
     };
     const result = await API.checkout(payload);
-    showToast(`Order #${result.order_id} placed successfully`);
+    showToast(`Поръчка №${result.order_id} е приета успешно`);
     await refreshCart();
     await loadOrders();
     showPage('orders');
@@ -297,21 +314,22 @@ async function loadOrders() {
     const orders = await API.getMyOrders();
     const wrap = document.getElementById('orders-list');
     if (!orders.length) {
-      wrap.innerHTML = `<div class="empty-state">No orders yet.</div>`;
+      wrap.innerHTML = `<div class="empty-state">Все още няма поръчки.</div>`;
       return;
     }
     wrap.innerHTML = orders.map(order => `
       <div class="order-card">
         <div class="order-head">
-          <strong>Order #${order.id}</strong>
-          <span class="pill">${escapeHtml(order.order_status || 'Unknown')}</span>
+          <strong>Поръчка №${order.id}</strong>
+          <span class="pill">${escapeHtml(order.order_status || 'Неизвестен')}</span>
         </div>
         <div class="muted">${new Date(order.order_date).toLocaleString()}</div>
-        <div>${order.item_count} item(s)</div>
+        <div>${order.item_count} артикул(а)</div>
         <div class="price">${formatMoney(order.total_amount)}</div>
       </div>
     `).join('');
   }
+  refreshIcons();
 }
 
 async function loadAdmin() {
@@ -322,25 +340,26 @@ async function loadAdmin() {
     API.getAdminOrders()
   ]);
   document.getElementById('summary-cards').innerHTML = `
-    <div class="summary-card"><div class="muted">Products</div><strong>${summary.products}</strong></div>
-    <div class="summary-card"><div class="muted">Low stock</div><strong>${summary.low_stock_products}</strong></div>
-    <div class="summary-card"><div class="muted">Orders</div><strong>${summary.orders}</strong></div>
-    <div class="summary-card"><div class="muted">Revenue</div><strong>${formatMoney(summary.revenue)}</strong></div>
+    <div class="summary-card"><div class="muted">Продукти</div><strong>${summary.products}</strong></div>
+    <div class="summary-card"><div class="muted">Ниска наличност</div><strong>${summary.low_stock_products}</strong></div>
+    <div class="summary-card"><div class="muted">Поръчки</div><strong>${summary.orders}</strong></div>
+    <div class="summary-card"><div class="muted">Оборот</div><strong>${formatMoney(summary.revenue)}</strong></div>
   `;
   renderAdminProducts(products);
   renderAdminOrders(orders);
+  refreshIcons();
 }
 
 function renderAdminProducts(products) {
   const wrap = document.getElementById('admin-products-table');
   if (!products.length) {
-    wrap.innerHTML = '<div class="empty-state">No products yet.</div>';
+    wrap.innerHTML = '<div class="empty-state">Все още няма продукти.</div>';
     return;
   }
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
-        <tr><th>Barcode</th><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th></th></tr>
+        <tr><th>Баркод</th><th>Име</th><th>Категория</th><th>Цена</th><th>Наличност</th><th></th></tr>
       </thead>
       <tbody>
         ${products.map(p => `
@@ -351,8 +370,8 @@ function renderAdminProducts(products) {
             <td>${formatMoney(p.price)}</td>
             <td>${p.stock_qty}</td>
             <td class="table-actions">
-              <button class="btn btn-ghost" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&apos;")})'>Edit</button>
-              <button class="btn btn-danger" onclick="deleteProduct('${p.barcode}')">Delete</button>
+              <button class="btn btn-ghost" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&apos;")})'>Редакция</button>
+              <button class="btn btn-danger" onclick="deleteProduct('${p.barcode}')">Изтрий</button>
             </td>
           </tr>
         `).join('')}
@@ -364,13 +383,13 @@ function renderAdminProducts(products) {
 function renderAdminOrders(orders) {
   const wrap = document.getElementById('admin-orders-table');
   if (!orders.length) {
-    wrap.innerHTML = '<div class="empty-state">No orders available.</div>';
+    wrap.innerHTML = '<div class="empty-state">Няма налични поръчки.</div>';
     return;
   }
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
-        <tr><th>ID</th><th>Customer</th><th>Date</th><th>Status</th><th>Total</th><th></th></tr>
+        <tr><th>ID</th><th>Клиент</th><th>Дата</th><th>Статус</th><th>Общо</th><th></th></tr>
       </thead>
       <tbody>
         ${orders.map(order => `
@@ -382,7 +401,7 @@ function renderAdminOrders(orders) {
             <td>${formatMoney(order.total_amount)}</td>
             <td>
               <select onchange="updateOrderStatus(${order.id}, this.value)">
-                ${['Pending', 'Processing', 'Shipped', 'Completed', 'Cancelled'].map(s => `<option value="${s}" ${s === order.order_status ? 'selected' : ''}>${s}</option>`).join('')}
+                ${['Чакаща', 'Обработва се', 'Изпратена', 'Завършена', 'Отказана'].map(s => `<option value="${s}" ${s === order.order_status ? 'selected' : ''}>${s}</option>`).join('')}
               </select>
             </td>
           </tr>
@@ -394,7 +413,7 @@ function renderAdminOrders(orders) {
 
 function editProduct(product) {
   STATE.editingBarcode = product.barcode;
-  document.getElementById('product-form-title').textContent = `Edit product ${product.name}`;
+  document.getElementById('product-form-title').textContent = `Редакция на продукт: ${product.name}`;
   document.getElementById('pf-barcode').value = product.barcode;
   document.getElementById('pf-barcode').disabled = true;
   document.getElementById('pf-name').value = product.name || '';
@@ -414,7 +433,7 @@ function editProduct(product) {
 
 function resetProductForm() {
   STATE.editingBarcode = null;
-  document.getElementById('product-form-title').textContent = 'Add new product';
+  document.getElementById('product-form-title').textContent = 'Добавяне на нов продукт';
   document.getElementById('product-form').reset();
   document.getElementById('pf-barcode').disabled = false;
 }
@@ -439,10 +458,10 @@ async function handleSaveProduct(event) {
   try {
     if (STATE.editingBarcode) {
       await API.updateProduct(STATE.editingBarcode, payload);
-      showToast('Product updated');
+      showToast('Продуктът е обновен');
     } else {
       await API.createProduct(payload);
-      showToast('Product created');
+      showToast('Продуктът е създаден');
     }
     resetProductForm();
     await loadAdmin();
@@ -453,10 +472,10 @@ async function handleSaveProduct(event) {
 }
 
 async function deleteProduct(barcode) {
-  if (!confirm('Delete this product?')) return;
+  if (!confirm('Да бъде ли изтрит този продукт?')) return;
   try {
     await API.deleteProduct(barcode);
-    showToast('Product deleted');
+    showToast('Продуктът е изтрит');
     await loadAdmin();
     await loadCatalog();
   } catch (error) {
@@ -467,7 +486,7 @@ async function deleteProduct(barcode) {
 async function updateOrderStatus(id, status) {
   try {
     await API.updateOrderStatus(id, status);
-    showToast('Order updated');
+    showToast('Поръчката е обновена');
   } catch (error) {
     showToast(error.message, true);
   }
@@ -484,7 +503,7 @@ function escapeHtml(text) {
 
 function formatMoney(value) {
   const number = Number(value || 0);
-  return new Intl.NumberFormat('en-EU', { style: 'currency', currency: 'EUR' }).format(number);
+  return new Intl.NumberFormat('bg-BG', { style: 'currency', currency: 'EUR' }).format(number);
 }
 
 function showToast(message, isError = false) {
