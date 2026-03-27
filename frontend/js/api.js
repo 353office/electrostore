@@ -38,6 +38,10 @@ window.API = {
     return this.request(`/products${query ? '?' + query : ''}`);
   },
 
+  getProduct(barcode) {
+    return this.request(`/products/${barcode}`);
+  },
+
   getCategories() {
     return this.request('/categories');
   },

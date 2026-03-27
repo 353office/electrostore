@@ -1,10 +1,8 @@
-
 function refreshIcons() {
   if (window.lucide && typeof window.lucide.createIcons === 'function') {
     window.lucide.createIcons();
   }
 }
-
 
 window.STATE = {
   user: null,
@@ -12,7 +10,8 @@ window.STATE = {
   categories: [],
   cart: null,
   currentPage: 'shop',
-  editingBarcode: null
+  editingBarcode: null,
+  selectedProduct: null
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -33,25 +32,49 @@ function bindEvents() {
 async function tryRestoreSession() {
   const token = localStorage.getItem('electrostore_token');
   if (!token) {
-    updateAuthUI();
+    await refreshApplicationShell();
     return;
   }
   try {
     const { user } = await API.getSession();
     STATE.user = user;
-    updateAuthUI();
-    if (user.role === 'customer') {
-      await refreshCart();
-      await loadAddresses();
-      await loadOrders();
-    }
-    if (user.role === 'admin') {
-      await loadAdmin();
-    }
   } catch (error) {
     localStorage.removeItem('electrostore_token');
-    updateAuthUI();
+    STATE.user = null;
   }
+  await refreshApplicationShell();
+}
+
+async function refreshApplicationShell(options = {}) {
+  const { keepCurrentPage = false } = options;
+  updateAuthUI();
+  clearRoleSpecificPanels();
+  renderFeaturedProducts();
+  renderProductGrid();
+
+  if (!STATE.user) {
+    STATE.cart = null;
+    renderCart();
+    renderOrders([]);
+    if (!keepCurrentPage) showPage('shop');
+    refreshIcons();
+    return;
+  }
+
+  if (STATE.user.role === 'customer') {
+    await Promise.all([refreshCart(), loadAddresses(), loadOrders()]);
+    if (!keepCurrentPage || STATE.currentPage === 'admin') showPage('shop');
+  } else {
+    await Promise.all([loadAdmin(), loadOrders()]);
+    if (!keepCurrentPage && STATE.currentPage === 'cart') showPage('shop');
+  }
+  refreshIcons();
+}
+
+function clearRoleSpecificPanels() {
+  document.getElementById('summary-cards').innerHTML = '';
+  document.getElementById('admin-products-table').innerHTML = '';
+  document.getElementById('admin-orders-table').innerHTML = '';
 }
 
 function updateAuthUI() {
@@ -107,17 +130,8 @@ async function handleLogin(event) {
     localStorage.setItem('electrostore_token', token);
     STATE.user = user;
     errorBox.textContent = '';
-    updateAuthUI();
-    if (user.role === 'customer') {
-      await refreshCart();
-      await loadAddresses();
-      await loadOrders();
-      showPage('shop');
-    } else {
-      await loadAdmin();
-      await loadOrders();
-      showPage('admin');
-    }
+    document.getElementById('login-form').reset();
+    await refreshApplicationShell();
   } catch (error) {
     errorBox.textContent = error.message;
   }
@@ -130,17 +144,19 @@ async function logout() {
   localStorage.removeItem('electrostore_token');
   STATE.user = null;
   STATE.cart = null;
-  updateAuthUI();
-  showPage('shop');
+  STATE.selectedProduct = null;
+  await refreshApplicationShell();
 }
 
 function showPage(page) {
   STATE.currentPage = page;
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
-  document.getElementById(`page-${page}`).classList.add('active');
+  const pageEl = document.getElementById(`page-${page}`);
+  if (pageEl) pageEl.classList.add('active');
   const nav = document.querySelector(`.nav-link[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   refreshIcons();
 }
 
@@ -153,6 +169,13 @@ async function loadCatalog() {
     STATE.products = await API.getProducts({ search, category });
     renderFeaturedProducts();
     renderProductGrid();
+    if (STATE.selectedProduct) {
+      const match = STATE.products.find(product => product.barcode === STATE.selectedProduct.barcode);
+      if (match) {
+        STATE.selectedProduct = match;
+        renderProductDetails(match);
+      }
+    }
     refreshIcons();
   } catch (error) {
     document.getElementById('product-grid').innerHTML = `<div class="empty-state">${error.message}</div>`;
@@ -189,33 +212,104 @@ function renderProductGrid() {
 }
 
 function renderProductCard(product) {
+  const image = product.image_url || 'https://placehold.co/600x400?text=ElectroStore';
+  const primaryAction = STATE.user && STATE.user.role === 'customer'
+    ? `<button class="btn btn-primary" onclick="event.stopPropagation(); addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави</button>`
+    : `<button class="btn btn-secondary" onclick="event.stopPropagation(); openLogin()"><i data-lucide="log-in"></i>Вход</button>`;
+
   return `
-    <article class="product-card">
+    <article class="product-card product-card-clickable" onclick="openProductPage('${product.barcode}')">
       <div class="product-image-wrap">
-        <img class="product-image" src="${product.image_url || 'https://placehold.co/600x400?text=ElectroStore'}" alt="${escapeHtml(product.name)}">
+        <img class="product-image" src="${image}" alt="${escapeHtml(product.name)}">
       </div>
       <div class="product-body">
         <div class="product-meta">${escapeHtml(product.category || 'Разни')} · ${escapeHtml(product.brand || '')}</div>
         <h3>${escapeHtml(product.name)}</h3>
-        <p class="muted">${escapeHtml(product.description || product.model || '')}</p>
-        <div class="product-footer">
-          <div>
+        <div class="product-card-bottom">
+          <div class="product-pricing">
             <div class="price">${formatMoney(product.price)}</div>
             <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Наличност: ${product.stock_qty}</div>
           </div>
-          ${STATE.user && STATE.user.role === 'customer'
-            ? `<button class="btn btn-primary" onclick="addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави</button>`
-            : `<button class="btn btn-secondary" onclick="openLogin()"><i data-lucide="log-in"></i>Влез за покупка</button>`}
+          <div class="product-card-actions">
+            <button class="btn btn-ghost" onclick="event.stopPropagation(); openProductPage('${product.barcode}')"><i data-lucide="arrow-right"></i>Детайли</button>
+            ${primaryAction}
+          </div>
         </div>
       </div>
     </article>
   `;
 }
 
+async function openProductPage(barcode) {
+  try {
+    const product = await API.getProduct(barcode);
+    STATE.selectedProduct = product;
+    renderProductDetails(product);
+    showPage('product');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function renderProductDetails(product) {
+  const container = document.getElementById('product-detail-content');
+  const image = product.image_url || 'https://placehold.co/900x600?text=ElectroStore';
+  const specs = [
+    ['Марка', product.brand || '—'],
+    ['Категория', product.category || '—'],
+    ['Модел', product.model || '—'],
+    ['Година', product.release_year || '—'],
+    ['Месец', product.release_month || '—'],
+    ['Баркод', product.barcode || '—']
+  ];
+  const action = STATE.user && STATE.user.role === 'customer'
+    ? `<button class="btn btn-primary detail-buy-btn" onclick="addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави в количката</button>`
+    : `<button class="btn btn-secondary detail-buy-btn" onclick="openLogin()"><i data-lucide="log-in"></i>Вход за покупка</button>`;
+
+  container.innerHTML = `
+    <div class="product-detail-layout">
+      <div class="product-detail-media panel">
+        <img class="product-detail-image" src="${image}" alt="${escapeHtml(product.name)}">
+      </div>
+      <div class="product-detail-main panel">
+        <div class="product-detail-top">
+          <div class="product-meta">${escapeHtml(product.category || 'Разни')} · ${escapeHtml(product.brand || '')}</div>
+          <h1>${escapeHtml(product.name)}</h1>
+          <div class="detail-price-row">
+            <div>
+              <div class="price detail-price">${formatMoney(product.price)}</div>
+              <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Наличност: ${product.stock_qty}</div>
+            </div>
+            ${action}
+          </div>
+        </div>
+        <div class="product-detail-copy">
+          <h3>Описание</h3>
+          <p>${escapeHtml(product.description || `${product.name} от ${product.brand || 'избрана марка'} с надеждна производителност и удобен дизайн за всекидневна употреба.`)}</p>
+        </div>
+        <div class="product-detail-copy">
+          <h3>Спецификации</h3>
+          <div class="spec-grid">
+            ${specs.map(([label, value]) => `
+              <div class="spec-item">
+                <div class="spec-label">${escapeHtml(label)}</div>
+                <div class="spec-value">${escapeHtml(value)}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  refreshIcons();
+}
+
 async function addProductToCart(barcode) {
   try {
     await API.addToCart(barcode, 1);
     await refreshCart();
+    renderFeaturedProducts();
+    renderProductGrid();
     showToast('Продуктът е добавен в количката');
   } catch (error) {
     showToast(error.message, true);
@@ -223,7 +317,10 @@ async function addProductToCart(barcode) {
 }
 
 async function refreshCart() {
-  if (!STATE.user || STATE.user.role !== 'customer') return;
+  if (!STATE.user || STATE.user.role !== 'customer') {
+    renderCart();
+    return;
+  }
   try {
     STATE.cart = await API.getCart();
     renderCart();
@@ -235,9 +332,14 @@ async function refreshCart() {
 function renderCart() {
   const wrap = document.getElementById('cart-items');
   const totalBox = document.getElementById('cart-total');
+  if (!STATE.user || STATE.user.role !== 'customer') {
+    wrap.innerHTML = `<div class="empty-state">Количката е достъпна след вход като клиент.</div>`;
+    totalBox.textContent = '0,00 €';
+    return;
+  }
   if (!STATE.cart || !STATE.cart.items.length) {
     wrap.innerHTML = `<div class="empty-state">Количката е празна.</div>`;
-    totalBox.textContent = '€0.00';
+    totalBox.textContent = '0,00 €';
     return;
   }
   wrap.innerHTML = STATE.cart.items.map(item => `
@@ -306,30 +408,37 @@ async function handleCheckout(event) {
 }
 
 async function loadOrders() {
-  if (!STATE.user) return;
+  if (!STATE.user) {
+    renderOrders([]);
+    return;
+  }
   if (STATE.user.role === 'admin') {
     const orders = await API.getAdminOrders();
     renderAdminOrders(orders);
   } else {
     const orders = await API.getMyOrders();
-    const wrap = document.getElementById('orders-list');
-    if (!orders.length) {
-      wrap.innerHTML = `<div class="empty-state">Все още няма поръчки.</div>`;
-      return;
-    }
-    wrap.innerHTML = orders.map(order => `
-      <div class="order-card">
-        <div class="order-head">
-          <strong>Поръчка №${order.id}</strong>
-          <span class="pill">${escapeHtml(order.order_status || 'Неизвестен')}</span>
-        </div>
-        <div class="muted">${new Date(order.order_date).toLocaleString()}</div>
-        <div>${order.item_count} артикул(а)</div>
-        <div class="price">${formatMoney(order.total_amount)}</div>
-      </div>
-    `).join('');
+    renderOrders(orders);
   }
   refreshIcons();
+}
+
+function renderOrders(orders) {
+  const wrap = document.getElementById('orders-list');
+  if (!orders.length) {
+    wrap.innerHTML = `<div class="empty-state">Все още няма поръчки.</div>`;
+    return;
+  }
+  wrap.innerHTML = orders.map(order => `
+    <div class="order-card">
+      <div class="order-head">
+        <strong>Поръчка №${order.id}</strong>
+        <span class="pill">${escapeHtml(order.order_status || 'Неизвестен')}</span>
+      </div>
+      <div class="muted">${new Date(order.order_date).toLocaleString()}</div>
+      <div>${order.item_count} артикул(а)</div>
+      <div class="price">${formatMoney(order.total_amount)}</div>
+    </div>
+  `).join('');
 }
 
 async function loadAdmin() {
@@ -487,6 +596,7 @@ async function updateOrderStatus(id, status) {
   try {
     await API.updateOrderStatus(id, status);
     showToast('Поръчката е обновена');
+    await loadOrders();
   } catch (error) {
     showToast(error.message, true);
   }
