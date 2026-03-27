@@ -403,6 +403,12 @@ async function persistAddresses() {
 async function handleCheckout(event) {
   event.preventDefault();
   try {
+    const session = await API.getSession();
+    STATE.user = session.user;
+    if (!STATE.user || STATE.user.role !== 'customer') {
+      throw new Error('Трябва да си влязъл като клиент, за да направиш поръчка.');
+    }
+
     const saved = await persistAddresses();
     const payload = {
       shipping_address_id: saved.shipping_address_id,
@@ -412,9 +418,7 @@ async function handleCheckout(event) {
     };
     const result = await API.checkout(payload);
     showToast(`Поръчка №${result.order_id} е приета успешно`);
-    await refreshCart();
-    await loadAddresses();
-    await loadOrders();
+    await refreshApplicationShell({ keepCurrentPage: true });
     showPage('orders');
   } catch (error) {
     showToast(error.message, true);
