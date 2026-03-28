@@ -329,18 +329,46 @@ app.delete('/api/cart/items/:id', authRequired, async (req, res) => {
 
 app.post('/api/orders/checkout', authRequired, async (req, res) => {
   try {
-    if (!req.user.customer_egn) {
-      return res.status(400).json({ error: 'Only customer accounts can checkout' });
+    if (req.user.role !== 'customer' || !req.user.customer_egn) {
+      return res.status(400).json({ error: 'Само клиентски профили могат да финализират поръчка.', code: 'NOT_CUSTOMER' });
     }
 
     const { shipping_address_id, billing_address_id, payment_method = 'Card', notes = '' } = req.body || {};
 
-    const cartResult = await pool.query(
+    let resolvedShippingId = shipping_address_id || null;
+    let resolvedBillingId = billing_address_id || null;
+
+    if (!resolvedShippingId || !resolvedBillingId) {
+      const addressResult = await pool.query(
+        `SELECT id, address_type, is_default
+         FROM customer_address
+         WHERE egn = $1
+         ORDER BY is_default DESC, id ASC`,
+        [req.user.customer_egn]
+      );
+      const addresses = addressResult.rows;
+      const shippingAddress = addresses.find(a => String(a.address_type || '').toLowerCase() === 'shipping') || addresses[0];
+      const billingAddress = addresses.find(a => String(a.address_type || '').toLowerCase() === 'billing') || shippingAddress || addresses[0];
+      resolvedShippingId = resolvedShippingId || (shippingAddress ? shippingAddress.id : null);
+      resolvedBillingId = resolvedBillingId || (billingAddress ? billingAddress.id : null);
+    }
+
+    if (!resolvedShippingId || !resolvedBillingId) {
+      return res.status(400).json({ error: 'Моля въведи и запази адрес за доставка и адрес за фактура.', code: 'MISSING_ADDRESSES' });
+    }
+
+    let cartResult = await pool.query(
       'SELECT * FROM carts WHERE user_id = $1 AND status = $2 ORDER BY id DESC LIMIT 1',
       [req.user.id, 'active']
     );
-    const cart = cartResult.rows[0];
-    if (!cart) return res.status(400).json({ error: 'No active cart found' });
+    let cart = cartResult.rows[0];
+    if (!cart) {
+      cartResult = await pool.query(
+        'INSERT INTO carts (user_id, status) VALUES ($1, $2) RETURNING *',
+        [req.user.id, 'active']
+      );
+      cart = cartResult.rows[0];
+    }
 
     const itemsResult = await pool.query(
       `SELECT ci.*, p.name, p.price, p.stock_qty
@@ -352,12 +380,12 @@ app.post('/api/orders/checkout', authRequired, async (req, res) => {
 
     const items = itemsResult.rows;
     if (!items.length) {
-      return res.status(400).json({ error: 'Cart is empty' });
+      return res.status(400).json({ error: 'Количката е празна.', code: 'EMPTY_CART' });
     }
 
     for (const item of items) {
       if (item.quantity > item.stock_qty) {
-        return res.status(400).json({ error: `Insufficient stock for ${item.name}` });
+        return res.status(400).json({ error: `Няма достатъчна наличност за ${item.name}.`, code: 'INSUFFICIENT_STOCK', barcode: item.barcode });
       }
     }
 
@@ -371,7 +399,7 @@ app.post('/api/orders/checkout', authRequired, async (req, res) => {
       (notes, order_status, order_subtotal, tax_amount, shipping_cost, total_amount, shipping_address_id, billing_address_id, payment_method, egn)
       VALUES ($1, 'Processing', $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *`,
-      [notes, subtotal, tax, shipping, total, shipping_address_id || null, billing_address_id || null, payment_method, req.user.customer_egn]
+      [notes, subtotal, tax, shipping, total, resolvedShippingId, resolvedBillingId, payment_method, req.user.customer_egn]
     );
     const order = orderResult.rows[0];
 

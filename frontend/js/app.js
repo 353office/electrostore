@@ -613,8 +613,11 @@ async function deleteProduct(barcode) {
 async function updateOrderStatus(id, status) {
   try {
     await API.updateOrderStatus(id, status);
-    showToast('Поръчката е обновена');
+    showToast('Статусът на поръчката е обновен');
     await loadOrders();
+    if (STATE.user && STATE.user.role === 'admin') {
+      await loadAdmin();
+    }
   } catch (error) {
     showToast(error.message, true);
   }
@@ -642,6 +645,10 @@ function formatDateTime(value) {
     minute: '2-digit',
     hour12: false
   }).format(date);
+}
+
+function formatDateTimeBg(value) {
+  return formatDateTime(value);
 }
 
 function formatMoney(value) {
