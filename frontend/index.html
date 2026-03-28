@@ -225,6 +225,16 @@
     </div>
   </div>
 
+  <div id="order-modal" class="modal-overlay hidden" onclick="if(event.target===this) closeAdminOrderModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 style="margin:0">Детайли за поръчка</h2>
+        <button class="btn btn-ghost" type="button" onclick="closeAdminOrderModal()">Затвори</button>
+      </div>
+      <div id="order-modal-content"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
   <script src="https://unpkg.com/lucide@latest"></script>

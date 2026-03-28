@@ -11,7 +11,8 @@ window.STATE = {
   cart: null,
   currentPage: 'shop',
   editingBarcode: null,
-  selectedProduct: null
+  selectedProduct: null,
+  selectedAdminOrder: null
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -213,9 +214,12 @@ function renderProductGrid() {
 
 function renderProductCard(product) {
   const image = product.image_url || 'https://placehold.co/600x400?text=ElectroStore';
-  const primaryAction = STATE.user && STATE.user.role === 'customer'
-    ? `<button class="btn btn-primary" onclick="event.stopPropagation(); addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави</button>`
-    : `<button class="btn btn-secondary" onclick="event.stopPropagation(); openLogin()"><i data-lucide="log-in"></i>Вход</button>`;
+  const isOutOfStock = Number(product.stock_qty || 0) <= 0;
+  const primaryAction = isOutOfStock
+    ? `<button class="btn btn-disabled" type="button" disabled onclick="event.stopPropagation(); return false;"><i data-lucide="ban"></i>Изчерпан</button>`
+    : STATE.user && STATE.user.role === 'customer'
+      ? `<button class="btn btn-primary" onclick="event.stopPropagation(); addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави</button>`
+      : `<button class="btn btn-secondary" onclick="event.stopPropagation(); openLogin()"><i data-lucide="log-in"></i>Вход</button>`;
 
   return `
     <article class="product-card product-card-clickable" onclick="openProductPage('${product.barcode}')">
@@ -228,7 +232,7 @@ function renderProductCard(product) {
         <div class="product-card-bottom">
           <div class="product-pricing">
             <div class="price">${formatMoney(product.price)}</div>
-            <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Наличност: ${product.stock_qty}</div>
+            <div class="stock ${Number(product.stock_qty || 0) <= 0 ? 'zero' : product.stock_qty <= 10 ? 'low' : ''}">${Number(product.stock_qty || 0) <= 0 ? 'Няма наличност' : `Наличност: ${product.stock_qty}`}</div>
           </div>
           <div class="product-card-actions">
             <button class="btn btn-ghost" onclick="event.stopPropagation(); openProductPage('${product.barcode}')"><i data-lucide="arrow-right"></i>Детайли</button>
@@ -262,9 +266,12 @@ function renderProductDetails(product) {
     ['Месец', product.release_month || '—'],
     ['Баркод', product.barcode || '—']
   ];
-  const action = STATE.user && STATE.user.role === 'customer'
-    ? `<button class="btn btn-primary detail-buy-btn" onclick="addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави в количката</button>`
-    : `<button class="btn btn-secondary detail-buy-btn" onclick="openLogin()"><i data-lucide="log-in"></i>Вход за покупка</button>`;
+  const isOutOfStock = Number(product.stock_qty || 0) <= 0;
+  const action = isOutOfStock
+    ? `<button class="btn btn-disabled detail-buy-btn" type="button" disabled><i data-lucide="ban"></i>Изчерпан</button>`
+    : STATE.user && STATE.user.role === 'customer'
+      ? `<button class="btn btn-primary detail-buy-btn" onclick="addProductToCart('${product.barcode}')"><i data-lucide="shopping-cart"></i>Добави в количката</button>`
+      : `<button class="btn btn-secondary detail-buy-btn" onclick="openLogin()"><i data-lucide="log-in"></i>Вход за покупка</button>`;
 
   container.innerHTML = `
     <div class="product-detail-layout">
@@ -278,7 +285,7 @@ function renderProductDetails(product) {
           <div class="detail-price-row">
             <div>
               <div class="price detail-price">${formatMoney(product.price)}</div>
-              <div class="stock ${product.stock_qty <= 10 ? 'low' : ''}">Наличност: ${product.stock_qty}</div>
+              <div class="stock ${Number(product.stock_qty || 0) <= 0 ? 'zero' : product.stock_qty <= 10 ? 'low' : ''}">${Number(product.stock_qty || 0) <= 0 ? 'Няма наличност' : `Наличност: ${product.stock_qty}`}</div>
             </div>
             ${action}
           </div>
@@ -305,6 +312,11 @@ function renderProductDetails(product) {
 }
 
 async function addProductToCart(barcode) {
+  const product = STATE.products.find(item => item.barcode === barcode) || (STATE.selectedProduct && STATE.selectedProduct.barcode === barcode ? STATE.selectedProduct : null);
+  if (product && Number(product.stock_qty || 0) <= 0) {
+    showToast('Продуктът е изчерпан.', true);
+    return;
+  }
   try {
     await API.addToCart(barcode, 1);
     await refreshCart();
@@ -516,7 +528,7 @@ function renderAdminOrders(orders) {
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
-        <tr><th>ID</th><th>Клиент</th><th>Дата</th><th>Статус</th><th>Общо</th><th></th></tr>
+        <tr><th>ID</th><th>Клиент</th><th>Дата</th><th>Статус</th><th>Общо</th><th>Артикули</th><th></th></tr>
       </thead>
       <tbody>
         ${orders.map(order => `
@@ -524,18 +536,102 @@ function renderAdminOrders(orders) {
             <td>${order.id}</td>
             <td>${escapeHtml((order.first_name || '') + ' ' + (order.last_name || ''))}</td>
             <td>${formatDateTimeBg(order.order_date)}</td>
-            <td>${escapeHtml(order.order_status || '')}</td>
+            <td><span class="pill status-pill">${escapeHtml(order.order_status || '')}</span></td>
             <td>${formatMoney(order.total_amount)}</td>
-            <td>
+            <td>${order.item_count || 0}</td>
+            <td class="table-actions order-actions-cell">
               <select onchange="updateOrderStatus(${order.id}, this.value)">
                 ${['Чакаща', 'Обработва се', 'Изпратена', 'Завършена', 'Отказана'].map(s => `<option value="${s}" ${s === order.order_status ? 'selected' : ''}>${s}</option>`).join('')}
               </select>
+              <button class="btn btn-ghost" onclick="openAdminOrderDetails(${order.id})">Детайли</button>
+              <button class="btn btn-danger" onclick="deleteOrderAsAdmin(${order.id})">Изтрий</button>
             </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
   `;
+}
+
+async function openAdminOrderDetails(id) {
+  try {
+    const order = await API.getAdminOrder(id);
+    STATE.selectedAdminOrder = order;
+    renderAdminOrderModal(order);
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+function closeAdminOrderModal() {
+  STATE.selectedAdminOrder = null;
+  document.getElementById('order-modal').classList.add('hidden');
+  document.getElementById('order-modal-content').innerHTML = '';
+}
+
+function renderAdminOrderModal(order) {
+  const modal = document.getElementById('order-modal');
+  const content = document.getElementById('order-modal-content');
+  const customerName = [order.first_name, order.middle_name, order.last_name].filter(Boolean).join(' ');
+  content.innerHTML = `
+    <div class="order-detail-grid">
+      <div class="panel">
+        <div class="section-title compact"><h2>Поръчка №${order.id}</h2><span class="pill status-pill">${escapeHtml(order.order_status || '')}</span></div>
+        <div class="detail-list">
+          <div><strong>Клиент:</strong> ${escapeHtml(customerName || '—')}</div>
+          <div><strong>Дата:</strong> ${formatDateTimeBg(order.order_date)}</div>
+          <div><strong>Плащане:</strong> ${escapeHtml(order.payment_method || '—')}</div>
+          <div><strong>Tracking:</strong> ${escapeHtml(order.tracking_number || '—')}</div>
+          <div><strong>Бележки:</strong> ${escapeHtml(order.notes || '—')}</div>
+          <div><strong>Доставка:</strong> ${escapeHtml(order.shipping_address || '—')}</div>
+          <div><strong>Фактура:</strong> ${escapeHtml(order.billing_address || '—')}</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="section-title compact"><h2>Суми</h2></div>
+        <div class="detail-list">
+          <div><strong>Междинна сума:</strong> ${formatMoney(order.order_subtotal)}</div>
+          <div><strong>ДДС:</strong> ${formatMoney(order.tax_amount)}</div>
+          <div><strong>Доставка:</strong> ${formatMoney(order.shipping_cost)}</div>
+          <div><strong>Общо:</strong> ${formatMoney(order.total_amount)}</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <div class="section-title compact"><h2>Артикули</h2></div>
+      <table class="data-table">
+        <thead><tr><th>Продукт</th><th>Баркод</th><th>Количество</th><th>Ед. цена</th><th>Сума</th></tr></thead>
+        <tbody>
+          ${(order.items || []).map(item => `
+            <tr>
+              <td>${escapeHtml(item.name || '')}</td>
+              <td>${escapeHtml(item.barcode || '')}</td>
+              <td>${item.qty}</td>
+              <td>${formatMoney(item.unit_price)}</td>
+              <td>${formatMoney(item.subtotal)}</td>
+            </tr>
+          `).join('') || '<tr><td colspan="5">Няма артикули.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+  modal.classList.remove('hidden');
+}
+
+async function deleteOrderAsAdmin(id) {
+  if (!confirm(`Да бъде ли изтрита поръчка №${id}? Наличностите ще бъдат върнати обратно.`)) return;
+  try {
+    await API.deleteAdminOrder(id);
+    showToast('Поръчката е изтрита');
+    if (STATE.selectedAdminOrder && Number(STATE.selectedAdminOrder.id) === Number(id)) {
+      closeAdminOrderModal();
+    }
+    await loadOrders();
+    await loadAdmin();
+    await loadCatalog();
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 function editProduct(product) {
@@ -581,6 +677,11 @@ async function handleSaveProduct(event) {
     description: document.getElementById('pf-description').value.trim(),
     is_featured: document.getElementById('pf-featured').checked
   };
+
+  if (!/^[0-9]{8,14}$/.test(payload.barcode)) {
+    showToast('Баркодът трябва да съдържа само цифри и да е 8–14 знака.', true);
+    return;
+  }
 
   try {
     if (STATE.editingBarcode) {

@@ -135,6 +135,14 @@ window.API = {
     return this.request('/admin/orders');
   },
 
+  getAdminOrder(id) {
+    return this.request(`/admin/orders/${id}`);
+  },
+
+  deleteAdminOrder(id) {
+    return this.request(`/admin/orders/${id}`, { method: 'DELETE' });
+  },
+
   updateOrderStatus(id, order_status) {
     return this.request(`/admin/orders/${id}/status`, {
       method: 'PATCH',

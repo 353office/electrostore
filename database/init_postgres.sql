@@ -105,7 +105,7 @@ CREATE TABLE staff_education (
 );
 
 CREATE TABLE product (
-  barcode VARCHAR(50) PRIMARY KEY,
+  barcode VARCHAR(14) PRIMARY KEY CHECK (barcode ~ '^[0-9]{8,14}$'),
   name VARCHAR(200) NOT NULL,
   price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
   brand VARCHAR(100),

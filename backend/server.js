@@ -89,6 +89,23 @@ function adminRequired(req, res, next) {
   next();
 }
 
+
+function normalizeBarcode(value) {
+  return String(value || '').trim();
+}
+
+function isValidBarcode(value) {
+  return /^[0-9]{8,14}$/.test(normalizeBarcode(value));
+}
+
+function validateBarcodeOrRespond(res, barcode) {
+  if (!isValidBarcode(barcode)) {
+    res.status(400).json({ error: 'Баркодът трябва да съдържа само цифри и да е между 8 и 14 знака.' });
+    return false;
+  }
+  return true;
+}
+
 app.get('/api/health', async (req, res) => {
   try {
     res.json({ ok: true, service: 'ElectroStore API', timestamp: new Date().toISOString(), build: BUILD_ID });
@@ -204,7 +221,8 @@ app.get('/api/products', async (req, res) => {
 });
 
 app.get('/api/products/:barcode', async (req, res) => {
-  const result = await pool.query('SELECT * FROM product WHERE barcode = $1', [req.params.barcode]);
+  if (!validateBarcodeOrRespond(res, req.params.barcode)) return;
+  const result = await pool.query('SELECT * FROM product WHERE barcode = $1', [normalizeBarcode(req.params.barcode)]);
   if (!result.rows[0]) {
     return res.status(404).json({ error: 'Product not found' });
   }
@@ -257,9 +275,11 @@ app.get('/api/cart', authRequired, async (req, res) => {
 app.post('/api/cart/items', authRequired, async (req, res) => {
   try {
     const { barcode, quantity = 1 } = req.body;
+    const normalizedBarcode = normalizeBarcode(barcode);
+    if (!validateBarcodeOrRespond(res, normalizedBarcode)) return;
     const qty = Math.max(1, Number(quantity) || 1);
 
-    const productResult = await pool.query('SELECT * FROM product WHERE barcode = $1', [barcode]);
+    const productResult = await pool.query('SELECT * FROM product WHERE barcode = $1', [normalizedBarcode]);
     const product = productResult.rows[0];
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
@@ -278,14 +298,20 @@ app.post('/api/cart/items', authRequired, async (req, res) => {
 
     const existing = await pool.query(
       'SELECT * FROM cart_items WHERE cart_id = $1 AND barcode = $2',
-      [cart.id, barcode]
+      [cart.id, normalizedBarcode]
     );
 
     if (existing.rows[0]) {
       const newQty = existing.rows[0].quantity + qty;
+      if (newQty > Number(product.stock_qty || 0)) {
+        return res.status(400).json({ error: product.stock_qty > 0 ? `Няма достатъчна наличност за ${product.name}.` : 'Продуктът е изчерпан.' });
+      }
       await pool.query('UPDATE cart_items SET quantity = $1 WHERE id = $2', [newQty, existing.rows[0].id]);
     } else {
-      await pool.query('INSERT INTO cart_items (cart_id, barcode, quantity) VALUES ($1, $2, $3)', [cart.id, barcode, qty]);
+      if (qty > Number(product.stock_qty || 0)) {
+        return res.status(400).json({ error: product.stock_qty > 0 ? `Няма достатъчна наличност за ${product.name}.` : 'Продуктът е изчерпан.' });
+      }
+      await pool.query('INSERT INTO cart_items (cart_id, barcode, quantity) VALUES ($1, $2, $3)', [cart.id, normalizedBarcode, qty]);
     }
 
     res.json({ ok: true });
@@ -298,6 +324,19 @@ app.post('/api/cart/items', authRequired, async (req, res) => {
 app.patch('/api/cart/items/:id', authRequired, async (req, res) => {
   try {
     const qty = Math.max(1, Number(req.body.quantity) || 1);
+    const itemResult = await pool.query(
+      `SELECT ci.id, p.stock_qty, p.name
+       FROM cart_items ci
+       JOIN product p ON p.barcode = ci.barcode
+       WHERE ci.id = $1
+         AND ci.cart_id IN (SELECT id FROM carts WHERE user_id = $2 AND status = 'active')`,
+      [req.params.id, req.user.id]
+    );
+    const item = itemResult.rows[0];
+    if (!item) return res.status(404).json({ error: 'Артикулът не е намерен в количката.' });
+    if (qty > Number(item.stock_qty || 0)) {
+      return res.status(400).json({ error: item.stock_qty > 0 ? `Няма достатъчна наличност за ${item.name}.` : 'Продуктът е изчерпан.' });
+    }
     await pool.query(
       `UPDATE cart_items
        SET quantity = $1
@@ -578,12 +617,15 @@ app.post('/api/admin/products', authRequired, adminRequired, async (req, res) =>
       is_featured = false
     } = req.body;
 
+    const normalizedBarcode = normalizeBarcode(barcode);
+    if (!validateBarcodeOrRespond(res, normalizedBarcode)) return;
+
     const result = await pool.query(
       `INSERT INTO product
       (barcode, name, price, brand, stock_qty, category, model, release_year, release_month, managed_by_egn, image_url, description, is_featured)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
       RETURNING *`,
-      [barcode, name, price, brand, stock_qty, category, model, release_year || null, release_month || null, req.user.staff_egn, image_url || null, description || null, !!is_featured]
+      [normalizedBarcode, name, price, brand, stock_qty, category, model, release_year || null, release_month || null, req.user.staff_egn, image_url || null, description || null, !!is_featured]
     );
 
     res.json(result.rows[0]);
@@ -595,6 +637,7 @@ app.post('/api/admin/products', authRequired, adminRequired, async (req, res) =>
 
 app.put('/api/admin/products/:barcode', authRequired, adminRequired, async (req, res) => {
   try {
+    if (!validateBarcodeOrRespond(res, req.params.barcode)) return;
     const {
       name,
       price,
@@ -638,7 +681,8 @@ app.put('/api/admin/products/:barcode', authRequired, adminRequired, async (req,
 
 app.delete('/api/admin/products/:barcode', authRequired, adminRequired, async (req, res) => {
   try {
-    await pool.query('DELETE FROM product WHERE barcode = $1', [req.params.barcode]);
+    if (!validateBarcodeOrRespond(res, req.params.barcode)) return;
+    await pool.query('DELETE FROM product WHERE barcode = $1', [normalizeBarcode(req.params.barcode)]);
     res.json({ ok: true });
   } catch (error) {
     console.error(error);
@@ -649,12 +693,80 @@ app.delete('/api/admin/products/:barcode', authRequired, adminRequired, async (r
 app.get('/api/admin/orders', authRequired, adminRequired, async (req, res) => {
   const result = await pool.query(
     `SELECT o.id, o.order_status, o.total_amount, o.order_date, o.payment_method,
-            c.first_name, c.last_name, c.egn
+            o.order_subtotal, o.tax_amount, o.shipping_cost, o.notes, o.tracking_number,
+            c.first_name, c.last_name, c.city, c.country,
+            sa.address AS shipping_address,
+            ba.address AS billing_address,
+            COALESCE(SUM(oi.qty), 0)::INT AS item_count
      FROM orders o
      LEFT JOIN customer c ON c.egn = o.egn
+     LEFT JOIN customer_address sa ON sa.id = o.shipping_address_id
+     LEFT JOIN customer_address ba ON ba.id = o.billing_address_id
+     LEFT JOIN order_items oi ON oi.order_id = o.id
+     GROUP BY o.id, c.first_name, c.last_name, c.city, c.country, sa.address, ba.address
      ORDER BY o.order_date DESC`
   );
   res.json(result.rows);
+});
+
+app.get('/api/admin/orders/:id', authRequired, adminRequired, async (req, res) => {
+  try {
+    const orderResult = await pool.query(
+      `SELECT o.*, c.first_name, c.middle_name, c.last_name, c.country, c.city, c.street, c.street_no,
+              sa.address AS shipping_address,
+              ba.address AS billing_address
+       FROM orders o
+       LEFT JOIN customer c ON c.egn = o.egn
+       LEFT JOIN customer_address sa ON sa.id = o.shipping_address_id
+       LEFT JOIN customer_address ba ON ba.id = o.billing_address_id
+       WHERE o.id = $1`,
+      [req.params.id]
+    );
+    const order = orderResult.rows[0];
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    const itemsResult = await pool.query(
+      `SELECT oi.id, oi.qty, oi.unit_price, oi.subtotal, oi.discount_amount,
+              p.barcode, p.name, p.brand, p.category, p.model
+       FROM order_items oi
+       JOIN product p ON p.barcode = oi.barcode
+       WHERE oi.order_id = $1
+       ORDER BY p.name`,
+      [req.params.id]
+    );
+
+    res.json({ ...order, items: itemsResult.rows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load order details' });
+  }
+});
+
+app.delete('/api/admin/orders/:id', authRequired, adminRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const itemsResult = await client.query('SELECT barcode, qty FROM order_items WHERE order_id = $1', [req.params.id]);
+    const orderResult = await client.query('SELECT id FROM orders WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!orderResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    for (const item of itemsResult.rows) {
+      await client.query('UPDATE product SET stock_qty = stock_qty + $1 WHERE barcode = $2', [item.qty, item.barcode]);
+    }
+
+    await client.query('DELETE FROM orders WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(error);
+    res.status(500).json({ error: 'Could not delete order' });
+  } finally {
+    client.release();
+  }
 });
 
 app.patch('/api/admin/orders/:id/status', authRequired, adminRequired, async (req, res) => {
