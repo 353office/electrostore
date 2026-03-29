@@ -295,3 +295,46 @@ button,input,select,textarea{font:inherit}
 .product-actions button {
   width: 100%;
 }
+
+
+/* Fix card inner spacing */
+.product-body {
+  padding: 16px;
+}
+
+/* Space between text and bottom section */
+.product-card-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+/* Better spacing for price block */
+.product-price {
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+/* Stock spacing */
+.product-stock {
+  margin-bottom: 10px;
+}
+
+/* Buttons spacing */
+.product-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* Make buttons feel less cramped */
+.product-actions button {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+/* Add breathing room to cards */
+.product-card {
+  padding-bottom: 12px;
+}
