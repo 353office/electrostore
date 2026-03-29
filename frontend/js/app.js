@@ -12,7 +12,8 @@ window.STATE = {
   currentPage: 'shop',
   editingBarcode: null,
   selectedProduct: null,
-  selectedAdminOrder: null
+  selectedAdminOrder: null,
+  adminUsers: []
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -473,20 +474,67 @@ function renderOrders(orders) {
 
 async function loadAdmin() {
   if (!STATE.user || STATE.user.role !== 'admin') return;
-  const [summary, products, orders] = await Promise.all([
+  const [summary, products, orders, users] = await Promise.all([
     API.getAdminSummary(),
     API.getAdminProducts(),
-    API.getAdminOrders()
+    API.getAdminOrders(),
+    API.getAdminUsers()
   ]);
+  STATE.adminUsers = users;
   document.getElementById('summary-cards').innerHTML = `
     <div class="summary-card"><div class="muted">Продукти</div><strong>${summary.products}</strong></div>
     <div class="summary-card"><div class="muted">Ниска наличност</div><strong>${summary.low_stock_products}</strong></div>
     <div class="summary-card"><div class="muted">Поръчки</div><strong>${summary.orders}</strong></div>
-    <div class="summary-card"><div class="muted">Оборот</div><strong>${formatMoney(summary.revenue)}</strong></div>
+    <div class="summary-card"><div class="muted">Потребители</div><strong>${users.length}</strong></div>
   `;
+  renderAdminUsers(users);
   renderAdminProducts(products);
   renderAdminOrders(orders);
   refreshIcons();
+}
+
+
+function renderAdminUsers(users) {
+  const wrap = document.getElementById('admin-users-table');
+  if (!wrap) return;
+  if (!users.length) {
+    wrap.innerHTML = '<div class="empty-state">Няма налични потребители.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>Потребител</th><th>Имейл</th><th>Роля</th><th>Профил</th><th>Сесии</th><th></th></tr>
+      </thead>
+      <tbody>
+        ${users.map(user => {
+          const profileInfo = user.customer_egn
+            ? `Клиент: ${escapeHtml(user.customer_egn)}`
+            : (user.staff_egn ? `Служител: ${escapeHtml(user.staff_egn)}` : 'Няма свързан профил');
+          return `
+            <tr>
+              <td>
+                <strong>${escapeHtml(user.display_name || 'Без име')}</strong>
+                <div class="user-meta">Създаден: ${formatDateTime(user.created_at)}</div>
+              </td>
+              <td>${escapeHtml(user.email || '')}</td>
+              <td>
+                <select class="user-role-select" onchange="changeUserRole('${user.id}', this.value)">
+                  <option value="customer" ${user.role === 'customer' ? 'selected' : ''}>Клиент</option>
+                  <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Админ</option>
+                </select>
+              </td>
+              <td>${profileInfo}</td>
+              <td>${user.active_sessions || 0}</td>
+              <td class="table-actions column">
+                <button class="btn btn-danger" onclick="deleteAdminUser('${user.id}')" ${STATE.user && STATE.user.id === user.id ? 'disabled' : ''}>Изтрий</button>
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderAdminProducts(products) {
@@ -629,6 +677,29 @@ async function deleteOrderAsAdmin(id) {
     await loadOrders();
     await loadAdmin();
     await loadCatalog();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
+
+async function changeUserRole(id, role) {
+  try {
+    await API.updateAdminUser(id, { role });
+    showToast('Ролята на потребителя е обновена');
+    await loadAdmin();
+  } catch (error) {
+    showToast(error.message, true);
+    await loadAdmin();
+  }
+}
+
+async function deleteAdminUser(id) {
+  if (!confirm('Да бъде ли изтрит този потребител?')) return;
+  try {
+    await API.deleteAdminUser(id);
+    showToast('Потребителят е изтрит');
+    await loadAdmin();
   } catch (error) {
     showToast(error.message, true);
   }

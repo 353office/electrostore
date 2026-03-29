@@ -8,7 +8,7 @@ const { createPool } = require('./db');
 const app = express();
 const pool = createPool();
 
-const BUILD_ID = 'address-route-check-' + new Date().toISOString();
+const BUILD_ID = 'admin-user-panel-' + new Date().toISOString();
 
 app.use((req, res, next) => {
   res.setHeader('X-ElectroStore-Build', BUILD_ID);
@@ -780,6 +780,101 @@ app.patch('/api/admin/orders/:id/status', authRequired, adminRequired, async (re
   );
   if (!result.rows[0]) return res.status(404).json({ error: 'Order not found' });
   res.json(result.rows[0]);
+});
+
+
+app.get('/api/admin/users', authRequired, adminRequired, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.id, u.email, u.display_name, u.role, u.customer_egn, u.staff_egn, u.created_at,
+              COUNT(s.token)::INT AS active_sessions
+       FROM app_users u
+       LEFT JOIN app_sessions s ON s.user_id = u.id
+       GROUP BY u.id
+       ORDER BY u.created_at ASC, u.email ASC`
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load users' });
+  }
+});
+
+app.patch('/api/admin/users/:id', authRequired, adminRequired, async (req, res) => {
+  try {
+    const { role, display_name } = req.body || {};
+    const updates = [];
+    const values = [];
+
+    if (role !== undefined) {
+      if (!['admin', 'customer'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+      }
+      if (req.params.id === req.user.id && role !== 'admin') {
+        return res.status(400).json({ error: 'You cannot remove your own admin role.' });
+      }
+      if (role === 'customer') {
+        const currentUser = await pool.query('SELECT customer_egn FROM app_users WHERE id = $1', [req.params.id]);
+        if (!currentUser.rows[0]) {
+          return res.status(404).json({ error: 'User not found' });
+        }
+        if (!currentUser.rows[0].customer_egn) {
+          return res.status(400).json({ error: 'This account cannot become a customer because it is not linked to a customer profile.' });
+        }
+      }
+      values.push(role);
+      updates.push(`role = $${values.length}`);
+    }
+
+    if (display_name !== undefined) {
+      values.push(String(display_name).trim());
+      updates.push(`display_name = $${values.length}`);
+    }
+
+    if (!updates.length) {
+      return res.status(400).json({ error: 'No valid fields provided' });
+    }
+
+    values.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE app_users
+       SET ${updates.join(', ')}
+       WHERE id = $${values.length}
+       RETURNING id, email, display_name, role, customer_egn, staff_egn, created_at`,
+      values
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not update user' });
+  }
+});
+
+app.delete('/api/admin/users/:id', authRequired, adminRequired, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot delete your own account.' });
+    }
+
+    await client.query('BEGIN');
+    const userResult = await client.query('SELECT id FROM app_users WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!userResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await client.query('DELETE FROM app_users WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error(error);
+    res.status(500).json({ error: 'Could not delete user' });
+  } finally {
+    client.release();
+  }
 });
 
 app.use((error, req, res, next) => {

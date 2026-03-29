@@ -256,3 +256,7 @@ button,input,select,textarea{font:inherit}
   .order-detail-grid{grid-template-columns:1fr}
   .order-actions-cell{min-width:0}
 }
+
+.user-role-select{min-width:150px}
+.user-meta{font-size:.88rem;color:var(--muted);line-height:1.5}
+.table-actions.column{flex-direction:column;align-items:flex-start}

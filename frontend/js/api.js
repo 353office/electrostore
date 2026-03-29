@@ -135,6 +135,21 @@ window.API = {
     return this.request('/admin/orders');
   },
 
+  getAdminUsers() {
+    return this.request('/admin/users');
+  },
+
+  updateAdminUser(id, payload) {
+    return this.request(`/admin/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  deleteAdminUser(id) {
+    return this.request(`/admin/users/${id}`, { method: 'DELETE' });
+  },
+
   getAdminOrder(id) {
     return this.request(`/admin/orders/${id}`);
   },
