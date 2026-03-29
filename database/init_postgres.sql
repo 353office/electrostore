@@ -1,7 +1,4 @@
--- ElectroStore PostgreSQL schema
--- Converted from the uploaded MySQL electronics-store schema
--- and extended with app-specific tables for login, carts, and admin use.
-
+--this DB is pasted in the aiven service and handled there.
 DROP VIEW IF EXISTS customer_view CASCADE;
 DROP VIEW IF EXISTS staff_view CASCADE;
 DROP FUNCTION IF EXISTS calculate_age_from_egn(TEXT);
